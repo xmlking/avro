@@ -62,34 +62,39 @@ func TestReader_ReadDelayedReader(t *testing.T) {
 
 func TestReader_Read(t *testing.T) {
 	tests := []struct {
-		data    []byte
-		want    []byte
-		wantErr bool
+		data     []byte
+		want     []byte
+		wantRead int
+		wantErr  bool
 	}{
 		{
-			data:    []byte{0xAC, 0xDC, 0x01, 0x00, 0x10, 0x0F},
-			want:    make([]byte, 6),
-			wantErr: false,
+			data:     []byte{0xAC, 0xDC, 0x01, 0x00, 0x10, 0x0F, 0xAB},
+			want:     make([]byte, 6),
+			wantRead: 6,
+			wantErr:  false,
 		},
 		{
-			data:    []byte{0xAC}, // io.EOF
-			want:    make([]byte, 6),
-			wantErr: true,
+			data:     []byte{0xAC}, // io.EOF
+			want:     make([]byte, 6),
+			wantRead: 1,
+			wantErr:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		r := avro.NewReader(bytes.NewReader(tt.data), 2)
 
-		r.Read(tt.want)
+		n, err := r.Read(tt.want)
 
 		if tt.wantErr {
-			assert.Error(t, r.Error)
+			assert.Error(t, err)
+			assert.Equal(t, tt.wantRead, n)
 			continue
 		}
 
-		assert.NoError(t, r.Error)
-		assert.Equal(t, tt.want, tt.data)
+		assert.NoError(t, err)
+		assert.Equal(t, tt.wantRead, n)
+		assert.Equal(t, tt.want, tt.data[:n])
 	}
 }
 

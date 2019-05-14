@@ -8,6 +8,10 @@ import (
 	"github.com/modern-go/reflect2"
 )
 
+const (
+	defaultBufSize = 1024
+)
+
 // DefaultConfig is the default API.
 var DefaultConfig = Config{}.Freeze()
 
@@ -51,7 +55,7 @@ func (c Config) Freeze() API {
 			return &Writer{
 				cfg:   api,
 				out:   nil,
-				buf:   make([]byte, 0, 512),
+				buf:   make([]byte, 0, defaultBufSize),
 				Error: nil,
 			}
 		},
@@ -154,7 +158,7 @@ func (c *frozenConfig) returnReader(reader *Reader) {
 }
 
 func (c *frozenConfig) NewEncoder(schema Schema, w io.Writer) *Encoder {
-	writer := NewWriter(w, 512, WithWriterConfig(c))
+	writer := NewWriter(w, defaultBufSize, WithWriterConfig(c))
 	return &Encoder{
 		s: schema,
 		w: writer,
@@ -162,7 +166,7 @@ func (c *frozenConfig) NewEncoder(schema Schema, w io.Writer) *Encoder {
 }
 
 func (c *frozenConfig) NewDecoder(schema Schema, r io.Reader) *Decoder {
-	reader := NewReader(r, 512, WithReaderConfig(c))
+	reader := NewReader(r, defaultBufSize, WithReaderConfig(c))
 	return &Decoder{
 		s: schema,
 		r: reader,

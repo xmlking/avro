@@ -14,7 +14,6 @@ import (
 	"io"
 
 	"github.com/hamba/avro"
-	"github.com/hamba/avro/internal/bytesx"
 )
 
 const (
@@ -45,7 +44,7 @@ type Header struct {
 // Decoder reads and decodes Avro values from a container file.
 type Decoder struct {
 	reader      *avro.Reader
-	resetReader *bytesx.ResetReader
+	resetReader *bytes.Reader
 	decoder     *avro.Decoder
 	sync        [16]byte
 
@@ -77,7 +76,7 @@ func NewDecoder(r io.Reader) (*Decoder, error) {
 		return nil, err
 	}
 
-	decReader := bytesx.NewResetReader([]byte{})
+	decReader := bytes.NewReader([]byte{})
 
 	return &Decoder{
 		reader:      reader,
@@ -128,19 +127,20 @@ func (d *Decoder) readBlock() int64 {
 
 	if count > 0 {
 		data := make([]byte, size)
-		d.reader.Read(data)
+		_, _ = d.reader.Read(data)
 
 		data, err := d.codec.Decode(data)
 		if err != nil {
 			d.reader.Error = err
+			return 0
 		}
 
 		d.resetReader.Reset(data)
 	}
 
 	var sync [16]byte
-	d.reader.Read(sync[:])
-	if d.sync != sync && d.reader.Error != io.EOF {
+	_, err := d.reader.Read(sync[:])
+	if d.sync != sync && err != io.EOF {
 		d.reader.Error = errors.New("decoder: invalid block")
 	}
 

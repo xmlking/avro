@@ -109,14 +109,14 @@ func (r *Reader) readByte() byte {
 }
 
 // Read reads data into the given bytes.
-func (r *Reader) Read(b []byte) {
+func (r *Reader) Read(b []byte) (int, error) {
 	size := len(b)
 	read := 0
 
 	for read < size {
 		if r.head == r.tail {
 			if !r.loadMore() {
-				return
+				break
 			}
 		}
 
@@ -124,6 +124,8 @@ func (r *Reader) Read(b []byte) {
 		r.head += n
 		read += n
 	}
+
+	return read, r.Error
 }
 
 // ReadBool reads a Bool from the Reader.
@@ -186,7 +188,7 @@ func (r *Reader) ReadLong() int64 {
 // ReadFloat reads a Float from the Reader.
 func (r *Reader) ReadFloat() float32 {
 	var buf [4]byte
-	r.Read(buf[:])
+	_, _ = r.Read(buf[:])
 
 	float := *(*float32)(unsafe.Pointer(&buf[0]))
 
@@ -196,7 +198,7 @@ func (r *Reader) ReadFloat() float32 {
 // ReadDouble reads a Double from the Reader.
 func (r *Reader) ReadDouble() float64 {
 	var buf [8]byte
-	r.Read(buf[:])
+	_, _ = r.Read(buf[:])
 
 	float := *(*float64)(unsafe.Pointer(&buf[0]))
 
@@ -213,7 +215,7 @@ func (r *Reader) ReadBytes() []byte {
 	}
 
 	buf := make([]byte, size)
-	r.Read(buf)
+	_, _ = r.Read(buf)
 
 	return buf
 }
@@ -234,7 +236,7 @@ func (r *Reader) ReadString() string {
 	}
 
 	buf := make([]byte, size)
-	r.Read(buf)
+	_, _ = r.Read(buf)
 
 	return *(*string)(unsafe.Pointer(&buf))
 }

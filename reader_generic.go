@@ -87,7 +87,7 @@ func (r *Reader) ReadNext(schema Schema) interface{} {
 
 	case Fixed:
 		obj := make([]byte, schema.(*FixedSchema).Size())
-		r.Read(obj)
+		_, _ = r.Read(obj)
 		return obj
 
 	default:
