@@ -85,8 +85,9 @@ func (w *Writer) writeByte(b byte) {
 }
 
 // Write writes raw bytes to the Writer.
-func (w *Writer) Write(b []byte) {
+func (w *Writer) Write(b []byte) (n int, err error) {
 	w.buf = append(w.buf, b...)
+	return len(b), nil
 }
 
 // WriteBool writes a Bool to the Writer.

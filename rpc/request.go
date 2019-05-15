@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 
 	"github.com/hamba/avro"
 	"golang.org/x/xerrors"
@@ -18,16 +17,14 @@ type Request struct {
 	Message string
 
 	// Body represents the request's payload in binary format.
-	Body io.ReadCloser
-
-	// Metadata is the request's metadata.
-	Metadata map[string][]byte
+	Body io.Reader
 
 	// RemoteAddr is the network address that sent the request.
 	// This field is ignored by the client.
 	RemoteAddr string
 
-	ctx context.Context
+	meta Metadata
+	ctx  context.Context
 }
 
 // NewRequest returns a new Request with the given message name and encoded body data.
@@ -41,12 +38,12 @@ func NewRequest(proto *avro.Protocol, name string, v interface{}) (*Request, err
 	if err != nil {
 		return nil, err
 	}
-	body := ioutil.NopCloser(bytes.NewReader(b))
+	body := bytes.NewReader(b)
 
 	return &Request{
-		Message:  name,
-		Body:     body,
-		Metadata: map[string][]byte{},
+		Message: name,
+		Body:    body,
+		meta:    make(Metadata),
 	}, nil
 }
 
@@ -57,6 +54,11 @@ func (r *Request) Context() context.Context {
 	}
 
 	return context.Background()
+}
+
+// Metadata returns the request's metadata.
+func (r *Request) Metadata() Metadata {
+	return r.meta
 }
 
 // WithContext returns a shallow copy of r with its context changed
@@ -75,7 +77,10 @@ func (r *Request) WithContext(ctx context.Context) *Request {
 
 // Write writes an Avro request in wire format.
 func (r *Request) Write(w io.Writer) error {
-	wr := avro.NewWriter(w, defaultBufSize)
+	wr, ok := w.(*avro.Writer)
+	if !ok {
+		wr = avro.NewWriter(w, defaultBufSize)
+	}
 
 	wr.WriteVal(metadataSchema, r.Metadata)
 	wr.WriteString(r.Message)
@@ -85,16 +90,15 @@ func (r *Request) Write(w io.Writer) error {
 	}
 
 	_, err = io.Copy(w, r.Body)
-	if err != nil {
-		return err
-	}
-
-	return r.Body.Close()
+	return err
 }
 
 // ReadRequest reads and parses an incoming request from b.
 func ReadRequest(b io.Reader) (*Request, error) {
-	r := avro.NewReader(b, defaultBufSize)
+	r, ok := b.(*avro.Reader)
+	if !ok {
+		r = avro.NewReader(b, defaultBufSize)
+	}
 
 	req := &Request{}
 
@@ -108,7 +112,7 @@ func ReadRequest(b io.Reader) (*Request, error) {
 		return nil, xerrors.Errorf("rpc: error reading request message name: %w", r.Error)
 	}
 
-	req.Body = ioutil.NopCloser(r)
+	req.Body = r
 
 	return req, nil
 }

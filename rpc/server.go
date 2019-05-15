@@ -17,12 +17,21 @@ var (
 )
 
 type ResponseWriter interface {
-	Write(v interface{})
-	Error(v interface{})
+	Metadata(key string, value []byte)
+
+	Write(value interface{})
+
+	Error(value interface{})
 }
 
 type Handler interface {
 	Serve(ResponseWriter, *Request)
+}
+
+type response struct {
+	conn      *conn
+	cancelCtx context.CancelFunc
+	req       *Request
 }
 
 type ConnState int
@@ -44,12 +53,13 @@ type conn struct {
 	bufr *bufio.Reader
 	bufw *bufio.Writer
 
-	curState uint64
+	werr error
+
+	state uint32
 }
 
 func (c *conn) setState(nc net.Conn, state ConnState) {
-	packedState := uint64(time.Now().Unix()<<8) | uint64(state)
-	atomic.StoreUint64(&c.curState, packedState)
+	atomic.StoreUint32(&c.state, uint32(state))
 
 	srv := c.server
 	switch state {
@@ -60,14 +70,36 @@ func (c *conn) setState(nc net.Conn, state ConnState) {
 	}
 }
 
-func (c *conn) getState() (state ConnState, unixSec int64) {
-	packedState := atomic.LoadUint64(&c.curState)
-	return ConnState(packedState & 0xff), int64(packedState >> 8)
+func (c *conn) getState() ConnState {
+	return ConnState(atomic.LoadUint32(&c.state))
 }
 
-//func (c *conn) readRequest(ctx context.Context) (w *response, err error) {
-//	return nil, nil
-//}
+func (c *conn) readRequest(ctx context.Context) (w *response, err error) {
+	if d := c.server.ReadTimeout; d != 0 {
+		c.rwc.SetReadDeadline(time.Now().Add(d))
+	}
+	if d := c.server.WriteTimeout; d != 0 {
+		defer func() {
+			c.rwc.SetWriteDeadline(time.Now().Add(d))
+		}()
+	}
+
+	//TODO: Handshake
+
+	req, err := ReadRequest(c.bufr)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancelCtx := context.WithCancel(ctx)
+	req.ctx = ctx
+	req.RemoteAddr = c.remoteAddr
+
+	return &response{
+		conn:      c,
+		cancelCtx: cancelCtx,
+		req:       req,
+	}, nil
+}
 
 func (c *conn) serve(ctx context.Context) {
 	c.remoteAddr = c.rwc.RemoteAddr().String()
@@ -84,55 +116,55 @@ func (c *conn) serve(ctx context.Context) {
 	c.cancelCtx = cancelCtx
 	defer cancelCtx()
 
-	//for {
-	//	w, err := c.readRequest(ctx)
-	//	if err != nil {
-	//		//TODO: write a system error back
-	//	}
-	//	c.setState(c.rwc, StateActive)
-	//
-	//	req := w.req
-	//	c.server.Handler.Serve(w, req)
-	//	w.cancelCtx()
-	//	w.finishRequest()
-	//
-	//	if !w.shouldReuseConnection() {
-	//		return
-	//	}
-	//	c.setState(c.rwc, StateIdle)
-	//
-	//	if d := c.server.idleTimeout(); d != 0 {
-	//		c.rwc.SetReadDeadline(time.Now().Add(d))
-	//		if _, err := c.bufr.Peek(4); err != nil {
-	//			return
-	//		}
-	//	}
-	//	c.rwc.SetReadDeadline(time.Time{})
-	//}
+	//TODO: pool these
+	c.bufr = bufio.NewReader(c.rwc)
+	c.bufw = bufio.NewWriter(c.rwc)
+
+	for {
+		w, err := c.readRequest(ctx)
+		if err != nil {
+			//TODO: write a system error back
+		}
+		c.setState(c.rwc, StateActive)
+
+		req := w.req
+		c.server.Handler.Serve(w, req)
+		w.cancelCtx()
+		c.flush()
+
+		if c.werr != nil {
+			return
+		}
+		c.setState(c.rwc, StateIdle)
+
+		if d := c.server.idleTimeout(); d != 0 {
+			c.rwc.SetReadDeadline(time.Now().Add(d))
+			if _, err := c.bufr.Peek(1); err != nil {
+				return
+			}
+		}
+		c.rwc.SetReadDeadline(time.Time{})
+	}
 }
 
-func (c *conn) finalFlush() {
-	if c.bufr != nil {
-		//putBufioReader(c.bufr)
-		c.bufr = nil
-	}
-
-	if c.bufw != nil {
-		c.bufw.Flush()
-		//putBufioWriter(c.bufw)
-		c.bufw = nil
-	}
+func (c *conn) flush() {
+	c.bufw.Flush()
 }
 
 func (c *conn) close() {
-	c.finalFlush()
+	c.flush()
 	c.rwc.Close()
 }
 
 type atomicBool int32
 
-func (b *atomicBool) isSet() bool { return atomic.LoadInt32((*int32)(b)) != 0 }
-func (b *atomicBool) setTrue()    { atomic.StoreInt32((*int32)(b), 1) }
+func (b *atomicBool) isSet() bool {
+	return atomic.LoadInt32((*int32)(b)) != 0
+}
+
+func (b *atomicBool) setTrue() {
+	atomic.StoreInt32((*int32)(b), 1)
+}
 
 type Server struct {
 	Addr string
@@ -242,6 +274,10 @@ func (s *Server) Serve(ln net.Listener) error {
 		return errors.New("rpc: protocol is required")
 	}
 
+	if s.Handler == nil {
+		return errors.New("rpc: handler is required")
+	}
+
 	ln = &onceCloseListener{Listener: ln}
 	defer ln.Close()
 
@@ -286,7 +322,7 @@ func (s *Server) Close() error {
 	return err
 }
 
-var shutdownPollInterval = 500 * time.Millisecond
+var shutdownPollInterval = 100 * time.Millisecond
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.inShutdown.setTrue()
@@ -327,11 +363,8 @@ func (s *Server) closeIdleConns() bool {
 
 	quiescent := true
 	for c := range s.activeConn {
-		st, unixSec := c.getState()
-		if st == StateNew && unixSec < time.Now().Unix()-5 {
-			st = StateIdle
-		}
-		if st != StateIdle {
+		state := c.getState()
+		if state != StateIdle {
 			quiescent = false
 			continue
 		}
