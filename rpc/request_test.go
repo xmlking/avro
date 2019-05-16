@@ -13,7 +13,7 @@ func TestNewRequest(t *testing.T) {
 	req, err := rpc.NewRequest(echoProtocol, "echo", echoRequest{Text: "foo"})
 
 	assert.NoError(t, err)
-	assert.Equal(t, "echo", req.Message)
+	assert.Equal(t, "echo", req.Name)
 	body, _ := ioutil.ReadAll(req.Body)
 	assert.Equal(t, []byte{0x06, 0x66, 0x6f, 0x6f}, body)
 }
@@ -49,7 +49,7 @@ func TestReadRequest(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t,rpc.Metadata{"foo": []byte("foo")}, req.Metadata())
-	assert.Equal(t, "echo", req.Message)
+	assert.Equal(t, "echo", req.Name)
 	body, _ := ioutil.ReadAll(req.Body)
 	assert.Equal(t, []byte{0x06, 0x66, 0x6f, 0x6f}, body)
 }
