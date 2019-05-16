@@ -104,10 +104,12 @@ func (c *ServerCodec) Serve(ctx context.Context, conn Conn) {
 	proto, err := c.handshake(r, w, conn)
 	if err != nil || proto == nil {
 		if err != nil {
-			//TODO: send system error for bad handshake
+			//TODO: do something with this error
 		}
 		return
 	}
+
+	//TODO: Make response writer
 
 	req, err := ReadRequest(r)
 	if err != nil {
@@ -118,8 +120,6 @@ func (c *ServerCodec) Serve(ctx context.Context, conn Conn) {
 	req.ctx = ctx
 	req.Protocol = c.protocol
 	req.RemoteAddr = conn.RemoteAddr()
-
-	//TODO: Make response writer
 
 	if req.Name == "" {
 		//TODO: handle pong
