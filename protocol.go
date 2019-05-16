@@ -2,7 +2,6 @@ package avro
 
 import (
 	"crypto/md5"
-	"encoding/hex"
 	"errors"
 	"io/ioutil"
 
@@ -22,7 +21,7 @@ type Protocol struct {
 	types    []NamedSchema
 	messages map[string]*Message
 
-	hash string
+	hash [16]byte
 }
 
 // NewProtocol creates a protocol instance.
@@ -39,8 +38,7 @@ func NewProtocol(name, space string, types []NamedSchema, messages map[string]*M
 		messages:   messages,
 	}
 
-	b := md5.Sum([]byte(p.String()))
-	p.hash = hex.EncodeToString(b[:])
+	p.hash = md5.Sum([]byte(p.String()))
 
 	return p, nil
 }
@@ -51,7 +49,7 @@ func (p *Protocol) Message(name string) *Message {
 }
 
 // Hash returns the MD5 hash of the protocol.
-func (p *Protocol) Hash() string {
+func (p *Protocol) Hash() [16]byte {
 	return p.hash
 }
 

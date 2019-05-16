@@ -16,24 +16,6 @@ var (
 	ErrServerClosed = errors.New("rpc: server closed")
 )
 
-type ResponseWriter interface {
-	Metadata(key string, value []byte)
-
-	Write(value interface{})
-
-	Error(value interface{})
-}
-
-type Handler interface {
-	Serve(ResponseWriter, *Request)
-}
-
-type response struct {
-	conn      *conn
-	cancelCtx context.CancelFunc
-	req       *Request
-}
-
 type ConnState int
 
 const (
@@ -55,10 +37,31 @@ type conn struct {
 
 	werr error
 
+	proto *avro.Protocol
 	state uint32
 }
 
-func (c *conn) setState(nc net.Conn, state ConnState) {
+func (c *conn) Read(p []byte) (n int, err error) {
+	return c.bufr.Read(p)
+}
+
+func (c *conn) Write(p []byte) (n int, err error) {
+	return c.bufw.Write(p)
+}
+
+func (c *conn) RemoteAddr() string {
+	return c.remoteAddr
+}
+
+func (c *conn) Protocol() *avro.Protocol {
+	return c.proto
+}
+
+func (c *conn) SetProtocol(p *avro.Protocol) {
+	c.proto = p
+}
+
+func (c *conn) setState(state ConnState) {
 	atomic.StoreUint32(&c.state, uint32(state))
 
 	srv := c.server
@@ -74,33 +77,6 @@ func (c *conn) getState() ConnState {
 	return ConnState(atomic.LoadUint32(&c.state))
 }
 
-func (c *conn) readRequest(ctx context.Context) (w *response, err error) {
-	if d := c.server.ReadTimeout; d != 0 {
-		c.rwc.SetReadDeadline(time.Now().Add(d))
-	}
-	if d := c.server.WriteTimeout; d != 0 {
-		defer func() {
-			c.rwc.SetWriteDeadline(time.Now().Add(d))
-		}()
-	}
-
-	//TODO: Handshake
-
-	req, err := ReadRequest(c.bufr)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancelCtx := context.WithCancel(ctx)
-	req.ctx = ctx
-	req.RemoteAddr = c.remoteAddr
-
-	return &response{
-		conn:      c,
-		cancelCtx: cancelCtx,
-		req:       req,
-	}, nil
-}
-
 func (c *conn) serve(ctx context.Context) {
 	c.remoteAddr = c.rwc.RemoteAddr().String()
 	defer func() {
@@ -109,33 +85,35 @@ func (c *conn) serve(ctx context.Context) {
 		}
 
 		c.close()
-		c.setState(c.rwc, StateClosed)
+		c.setState(StateClosed)
 	}()
 
 	ctx, cancelCtx := context.WithCancel(ctx)
 	c.cancelCtx = cancelCtx
 	defer cancelCtx()
 
-	//TODO: pool these
-	c.bufr = bufio.NewReader(c.rwc)
-	c.bufw = bufio.NewWriter(c.rwc)
+	//TODO: pool these?
+	c.bufr = bufio.NewReader(NewFrameReader(c.rwc))
+	c.bufw = bufio.NewWriter(NewFrameWriter(c.rwc))
 
 	for {
-		w, err := c.readRequest(ctx)
-		if err != nil {
-			//TODO: write a system error back
+		if d := c.server.ReadTimeout; d != 0 {
+			c.rwc.SetReadDeadline(time.Now().Add(d))
 		}
-		c.setState(c.rwc, StateActive)
+		if d := c.server.WriteTimeout; d != 0 {
+			defer func() {
+				c.rwc.SetWriteDeadline(time.Now().Add(d))
+			}()
+		}
 
-		req := w.req
-		c.server.Handler.Serve(w, req)
-		w.cancelCtx()
+		c.setState(StateActive)
+		c.server.codec().Serve(ctx, c)
 		c.flush()
 
 		if c.werr != nil {
 			return
 		}
-		c.setState(c.rwc, StateIdle)
+		c.setState(StateIdle)
 
 		if d := c.server.idleTimeout(); d != 0 {
 			c.rwc.SetReadDeadline(time.Now().Add(d))
@@ -181,9 +159,21 @@ type Server struct {
 
 	inShutdown atomicBool
 
-	mu         sync.Mutex
-	listeners  map[*net.Listener]struct{}
-	activeConn map[*conn]struct{}
+	mu          sync.Mutex
+	serverCodec *ServerCodec
+	listeners   map[*net.Listener]struct{}
+	activeConn  map[*conn]struct{}
+}
+
+func (s *Server) codec() *ServerCodec {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.serverCodec == nil {
+		s.serverCodec = NewServerCodec(s.Protocol, s.Handler)
+	}
+
+	return s.serverCodec
 }
 
 func (s *Server) idleTimeout() time.Duration {
@@ -303,7 +293,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		}
 
 		c := s.newConn(rw)
-		c.setState(c.rwc, StateNew)
+		c.setState(StateNew)
 		go c.serve(ctx)
 	}
 }

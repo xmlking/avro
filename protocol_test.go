@@ -169,7 +169,7 @@ func TestParseProtocolFile(t *testing.T) {
 	protocol, err := avro.ParseProtocolFile("testdata/echo.avpr")
 
 	want := `{"protocol":"Echo","namespace":"org.hamba.avro","types":[{"name":"org.hamba.avro.Ping","type":"record","fields":[{"name":"timestamp","type":"long"},{"name":"text","type":"string"}]},{"name":"org.hamba.avro.Pong","type":"record","fields":[{"name":"timestamp","type":"long"},{"name":"ping","type":"org.hamba.avro.Ping"}]},{"name":"org.hamba.avro.PongError","type":"error","fields":[{"name":"timestamp","type":"long"},{"name":"reason","type":"string"}]}],"messages":{"ping":{"request":[{"name":"ping","type":"org.hamba.avro.Ping"}],"response":"org.hamba.avro.Pong","errors":["org.hamba.avro.PongError"]}}}`
-	wantMD5 := "5bc594ae86fc8c209f553ce3bc4291a5"
+	wantMD5 := [16]byte{0x5B, 0xC5, 0x94, 0xAE, 0x86, 0xFC, 0x8C, 0x20, 0x9F, 0x55, 0x3C, 0xE3, 0xBC, 0x42, 0x91, 0xA5}
 	assert.NoError(t, err)
 	assert.Equal(t, want, protocol.String())
 	assert.Equal(t, wantMD5, protocol.Hash())

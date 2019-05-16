@@ -23,44 +23,26 @@ func (r *Response) Metadata() Metadata {
 	return r.meta
 }
 
-// Write writes an Avro response in wire format.
-func (r *Response) Write(w io.Writer) error {
-	wr, ok := w.(*avro.Writer)
-	if !ok {
-		wr = avro.NewWriter(w, defaultBufSize)
-	}
-
-	wr.WriteVal(metadataSchema, r.meta)
-	wr.WriteBool(r.Error)
-	err := wr.Flush()
-	if err != nil {
-		return err
-	}
-
-	_, err = io.Copy(w, r.Body)
-	return err
-}
-
 // ReadResponse reads and parses an incoming response from b.
-func ReadResponse(b io.Reader) (*Response, error) {
-	r, ok := b.(*avro.Reader)
+func ReadResponse(r io.Reader) (*Response, error) {
+	rdr, ok := r.(*avro.Reader)
 	if !ok {
-		r = avro.NewReader(b, defaultBufSize)
+		rdr = avro.NewReader(r, defaultBufSize)
 	}
 
 	resp := &Response{}
 
-	r.ReadVal(metadataSchema, resp.meta)
-	if r.Error != nil {
-		return nil, xerrors.Errorf("rpc: error reading response metadata: %w", r.Error)
+	rdr.ReadVal(metadataSchema, resp.meta)
+	if rdr.Error != nil {
+		return nil, xerrors.Errorf("rpc: error reading response metadata: %w", rdr.Error)
 	}
 
-	resp.Error = r.ReadBool()
-	if r.Error != nil {
-		return nil, xerrors.Errorf("rpc: error reading response error flag: %w", r.Error)
+	resp.Error = rdr.ReadBool()
+	if rdr.Error != nil {
+		return nil, xerrors.Errorf("rpc: error reading response error flag: %w", rdr.Error)
 	}
 
-	resp.Body = r
+	resp.Body = rdr
 
 	return resp, nil
 }

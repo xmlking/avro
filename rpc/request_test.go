@@ -32,7 +32,7 @@ func TestNewRequest_BadValue(t *testing.T) {
 
 func TestRequest_Write(t *testing.T) {
 	req, _ := rpc.NewRequest(echoProtocol, "echo", echoRequest{Text: "foo"})
-	req.Metadata["foo"] = []byte("foo")
+	req.Metadata().Set("foo", []byte("foo"))
 
 	buf := bytes.NewBuffer(nil)
 	err := req.Write(buf)
@@ -48,7 +48,7 @@ func TestReadRequest(t *testing.T) {
 	req, err := rpc.ReadRequest(bytes.NewReader(data))
 
 	assert.NoError(t, err)
-	assert.Equal(t, map[string][]byte{"foo": []byte("foo")}, req.Metadata)
+	assert.Equal(t,rpc.Metadata{"foo": []byte("foo")}, req.Metadata())
 	assert.Equal(t, "echo", req.Message)
 	body, _ := ioutil.ReadAll(req.Body)
 	assert.Equal(t, []byte{0x06, 0x66, 0x6f, 0x6f}, body)

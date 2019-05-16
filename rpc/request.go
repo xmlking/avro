@@ -13,8 +13,14 @@ import (
 // Request represents the Avro request received by a server
 // or to be sent by a client.
 type Request struct {
-	// Message specifies the message name.
-	Message string
+	// Protocol is the protocol being used to sent the message.
+	Protocol *avro.Protocol
+
+	// Message is the message being sent.
+	Message *avro.Message
+
+	// Name is the message name.
+	Name string
 
 	// Body represents the request's payload in binary format.
 	Body io.Reader
@@ -28,8 +34,8 @@ type Request struct {
 }
 
 // NewRequest returns a new Request with the given message name and encoded body data.
-func NewRequest(proto *avro.Protocol, name string, v interface{}) (*Request, error) {
-	msg := proto.Message(name)
+func NewRequest(protocol *avro.Protocol, name string, v interface{}) (*Request, error) {
+	msg := protocol.Message(name)
 	if msg == nil {
 		return nil, fmt.Errorf("rpc: no message with name %s", name)
 	}
@@ -41,9 +47,11 @@ func NewRequest(proto *avro.Protocol, name string, v interface{}) (*Request, err
 	body := bytes.NewReader(b)
 
 	return &Request{
-		Message: name,
-		Body:    body,
-		meta:    make(Metadata),
+		Protocol: protocol,
+		Message:  msg,
+		Name:     name,
+		Body:     body,
+		meta:     Metadata{},
 	}, nil
 }
 
@@ -54,11 +62,6 @@ func (r *Request) Context() context.Context {
 	}
 
 	return context.Background()
-}
-
-// Metadata returns the request's metadata.
-func (r *Request) Metadata() Metadata {
-	return r.meta
 }
 
 // WithContext returns a shallow copy of r with its context changed
@@ -75,6 +78,11 @@ func (r *Request) WithContext(ctx context.Context) *Request {
 	return r2
 }
 
+// Metadata returns the request's metadata.
+func (r *Request) Metadata() Metadata {
+	return r.meta
+}
+
 // Write writes an Avro request in wire format.
 func (r *Request) Write(w io.Writer) error {
 	wr, ok := w.(*avro.Writer)
@@ -82,8 +90,8 @@ func (r *Request) Write(w io.Writer) error {
 		wr = avro.NewWriter(w, defaultBufSize)
 	}
 
-	wr.WriteVal(metadataSchema, r.Metadata)
-	wr.WriteString(r.Message)
+	wr.WriteVal(metadataSchema, r.meta)
+	wr.WriteString(r.Name)
 	err := wr.Flush()
 	if err != nil {
 		return err
@@ -94,25 +102,25 @@ func (r *Request) Write(w io.Writer) error {
 }
 
 // ReadRequest reads and parses an incoming request from b.
-func ReadRequest(b io.Reader) (*Request, error) {
-	r, ok := b.(*avro.Reader)
+func ReadRequest(r io.Reader) (*Request, error) {
+	rdr, ok := r.(*avro.Reader)
 	if !ok {
-		r = avro.NewReader(b, defaultBufSize)
+		rdr = avro.NewReader(r, defaultBufSize)
 	}
 
 	req := &Request{}
 
-	r.ReadVal(metadataSchema, &req.Metadata)
-	if r.Error != nil {
-		return nil, xerrors.Errorf("rpc: error reading request metadata: %w", r.Error)
+	rdr.ReadVal(metadataSchema, &req.meta)
+	if rdr.Error != nil {
+		return nil, xerrors.Errorf("rpc: error reading request metadata: %w", rdr.Error)
 	}
 
-	req.Message = r.ReadString()
-	if r.Error != nil {
-		return nil, xerrors.Errorf("rpc: error reading request message name: %w", r.Error)
+	req.Name = rdr.ReadString()
+	if rdr.Error != nil {
+		return nil, xerrors.Errorf("rpc: error reading request message name: %w", rdr.Error)
 	}
 
-	req.Body = r
+	req.Body = rdr
 
 	return req, nil
 }
