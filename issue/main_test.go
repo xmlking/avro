@@ -11,10 +11,6 @@ var Schema string
 
 var Payload []byte
 
-// The spec for Avro make blocks (arrays) size optional,
-// this payload does not include it.
-var PayloadSimple []byte
-
 type Superhero struct {
 	ID            int32         `avro:"id"`
 	AffiliationID int32         `avro:"affiliation_id"`
@@ -46,13 +42,6 @@ func TestMain(m *testing.M) {
 		log.Fatal(err)
 	}
 	Payload = payload
-
-	// Read in the payload
-	payload, err = ioutil.ReadFile("fixtures/superhero-simple-block.bin")
-	if err != nil {
-		log.Fatal(err)
-	}
-	PayloadSimple = payload
 
 	os.Exit(m.Run())
 }
